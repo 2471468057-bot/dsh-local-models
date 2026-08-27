@@ -1,0 +1,6 @@
+# dsh-local-models bundle patch: inserts the resident local-model adapter row.
+# Applied when a profile bundles this package (BUNDLE_PATCH). The row
+# references the package by name so Node resolution finds the installed code.
+- insert:
+    - id: local-models
+      name: 'dsh-local-models'
