@@ -1,41 +1,71 @@
-# dsh-local-models（本地模型 · llama-server/TurboQuant 插件）
+# dsh-local-models
 
-DeepSeek Harness 的动态 Cordis 插件：在聊天里直接调用本地 GGUF 模型（llama-server / TurboQuant），自动按显存优化启动参数，带**多场景随机可爱加载提示**与完整设置页、状态胶囊。
+DeepSeek Harness **常驻宿主 bundle**：本地 GGUF 模型（llama-server / TurboQuant）LLM 适配器。
 
-## 功能
+- 发送消息自动拉起本地模型，按显存自动优化启动参数（KV 缓存 `turbo4+turbo3`、上下文预算、MoE `--n-cpu-moe` 精确外溢、`batch 2048/512`）
+- **四场景随机可爱加载提示**：首次唤醒 / 空闲自动卸载后重唤醒 / 切换模型 / 就绪收尾
+- 5 分钟空闲自动卸载；支持 MTP 自推测 / 外部草稿模型
+- 宿主层静态插件：随 profile 开机自启，**无需每次定义/批准**，重启即常驻
 
-- **发送消息自动拉起本地模型**，按场景给出提示：首次唤醒 / 空闲自动卸载后重唤醒 / 切换模型 / 就绪收尾，每类 3 款可爱文案随机挑选，不单调
-- **按显存自动优化**启动参数：KV 缓存 `turbo4+turbo3`（压缩加速）、上下文自动计算（MoE 模型：dense+激活专家+KV 预算推导，含 `--n-cpu-moe` 精确外溢百分比）、`batch 2048/512`
-- **5 分钟空闲自动卸载**（GC 定时器）；状态胶囊实时显示「N 分钟后自动卸载」倒计时；卸载后下次唤醒会说明「刚被自动卸载」
-- 支持 **MTP 自推测 / 外部草稿模型**（同目录自动找 `*mtp*.gguf`，自动排除视觉/投影模型）
-- 设置页：目录递归扫描（>1.2GB 主模型）、后端目录/端口、主模型★、每模型上下文、投机解码模式、保留显存/内存预留
-- 配置数据存 credentials：`LOCAL_MODELS_DATA`（DSH 重启不丢）
+## 安装（bundle 方式）
 
-## 安装
+本仓库是一个标准 dsh bundle（`dsh.bundle.patch` + 自包含 `lib/index.js`，无运行时依赖）。
 
-1. 准备含 `llama-server.exe` 的后端目录（如 TurboQuant）与 GGUF 模型文件（建议 ≥1.2GB）。
-2. 在 DSH Web 会话里用 `cordis_define` 定义插件：
-   - `plugin`：`{"kind":"new","idPrefix":"lmcm"}`
-   - `code.host` ← 本仓库 [`src/host.js`](src/host.js) 内容
-   - `code.client` ← 本仓库 [`src/client.js`](src/client.js) 内容
-3. `cordis_run` 激活（首次需在 GUI 批准）。
-4. 打开 **设置 → 本地模型**：填模型目录 → 扫描 → 设主模型（可选改后端、端口、上下文、MTP/草稿）。
+```sh
+# 在 dsh 环境里（profile 目录）：
+dsh plugin --profile <名> add dsh-local-models
+# 或直接 pnpm add（git 地址）：
+pnpm add github:2471468057-bot/dsh-local-models
+```
 
-聊天输入框模型选择器会出现「本地模型」分组；发送消息时后台自动拉起服务。
+然后确认该 profile 的 `dsh.profile.bundles` 包含 `dsh-local-models`（`dsh plugin` 会自动 reconcile），**重启生效**。
 
-## 提示文案示例
+手工安装：
 
-| 场景 | 示例 |
-|---|---|
-| 唤醒 | 喵～ 正在唤醒「xx」，马上就来~ ／ 呜～ 正在把「xx」叫醒，等一下下~ |
-| 重唤醒（闲置卸载后） | 刚才空闲被自动卸载啦，正在重新唤醒「xx」… ／ 模型闲置被卸载了，我这就把它叫回来~ |
-| 切换模型 | 正在热切换：从「旧」换到「新」~ ／ 换模型啦～ 正在拉起「新」，稍等~ |
-| 就绪 | 好了！我马上接着回答你~ ／ 就绪啦，继续回答咯~ |
+1. 把本包放到 `$DSH_HOME/profiles/node_modules/dsh-local-models/`（或链接）；
+2. 在对应 profile 的补丁层（`$DSH_HOME/profiles/<名>/cordis.patch.yml`）加入：
 
-## 说明与注意
+```yaml
+- insert:
+    - id: local-models
+      name: 'dsh-local-models'
+```
 
-- 动态插件定义存于内存：**DSH 重启后需重新 `cordis_define` + `cordis_run`**（凭据 `LOCAL_MODELS_DATA` 在盘上，不丢；重启后插件 ID 会重新分配如 lmcm-1 → lmcm-2）。
-- **host-only 定义会丢掉设置页/状态胶囊**（Cordis 整包切换语义），修改 host 时务必保留 client。
-- 若 `cordis_define` 反复报 `"plugin" must match exactly one oneOf branch (matched 0)`：这是上游模型把 `plugin` 裸对象参数双编码成了 JSON 字符串。给 `packages/extensions/tool-cordis/src/index.ts` 加一句防御（plugin schema 增加 `{type:'string'}` 分支，`execute()` 里 `JSON.parse` 还原）并重启后即可修复。
-- LlmAdapter 注意：普通对象适配器必须自带 `prepareCall(provider, model, signal)` → `{model, stream}`；`finish` 块 reason 须为 `{kind:'stop'}` 对象。
-- 12GB 显存环境下 Qwen3 35B 约 30 tok/s，65k 上下文与高速不可兼得，属正常权衡。
+3. 重启 web/对应 profile。
+
+## 配置
+
+插件读取 `$DSH_HOME/local-models.json`（重启不丢；修改后重启或下次调用生效）：
+
+```json
+{
+  "dir": "G:\\modes",
+  "primary": "",
+  "backend": "G:\\modes\\turboquant-plus-tqp-v0.3.0-windows-x64-cuda12.4",
+  "port": 8080,
+  "reserveVRAMGB": 2,
+  "reserveRAMGB": 8,
+  "models": [
+    {
+      "path": "G:\\modes\\qwen\\xxx.gguf",
+      "shortName": "模型名",
+      "size": 17329854848,
+      "contextSize": 65536,
+      "spec": { "mode": "draft", "count": 3, "draftPath": "" }
+    }
+  ]
+}
+```
+
+`reserveVRAMGB` / `reserveRAMGB` 为优化器视为不可用的预留量。
+
+## 构建
+
+```sh
+node build.mjs   # esbuild → lib/index.js（自带 prepare 脚本）
+```
+
+## 说明
+
+- **`dynamic/`**：早期动态插件版本（含完整设置页 + 状态胶囊客户端 UI）。本 bundle 的静态宿主已取代其聊天级功能；UI 客户端因需改动 DSH 核心 RPC 网关暂未随 bundle 分发（配置可直接编辑上面的 JSON）。
+- 提示文案：`喵～ 正在唤醒「xx」，马上就来~` / `正在热切换：从「旧」换到「新」~` / `刚才空闲被自动卸载啦，正在重新唤醒「xx」…` / `好了！我马上接着回答你~` 等，每场景 3 款随机。
