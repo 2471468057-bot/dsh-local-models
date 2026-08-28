@@ -178,6 +178,22 @@ export function apply(ctx: any) {
       try { gc() } catch (err) { console.error('idle gc failed', err) }
     }, 30000)
 
+    function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms) }) }
+    async function serverReady(port, timeoutMs) {
+      var deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        var s = getSp()
+        try {
+          var h = s.spawn({ argv: ['curl', '-sS', '-o', 'NUL', '-w', '%{http_code}', '--max-time', '2', 'http://127.0.0.1:' + port + '/health'], cwd: 'C:\\', stdio: { stdin: 'ignore', stdout: { maxBytes: 64 }, stderr: 'ignore' }, graceMs: 3000 })
+          await h.done.catch(function() {})
+          var text = h.collected && h.collected.stdout ? h.collected.stdout.readFrom(0).text : ''
+          if (text.trim() === '200') return true
+        } catch (_e) {}
+        await sleep(1200)
+      }
+      return false
+    }
+
     async function ensure(modelPath, data, force) {
       var sp = getSp()
       var fsvc = getFs()
@@ -221,6 +237,10 @@ export function apply(ctx: any) {
         current.meta.retired = true
         current.handle.terminate()
         current = null
+        // Port-release grace so the old process frees 127.0.0.1:port before the
+        // new server binds it (a bind conflict crashes the new llama-server and
+        // stalls the conversation on a model switch).
+        await sleep(1500)
       }
       var handle = sp.spawn({ argv: [backend + '\\llama-server.exe'].concat(opt.args), cwd: backend, stdio: { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' }, graceMs: 3000 })
       var entry = { handle: handle, lastUsed: Date.now(), lastResult: null, meta: { pid: handle.pid, port: data.port, model: modelPath, name: card.shortName, userCtx: userCtx } }
@@ -231,6 +251,16 @@ export function apply(ctx: any) {
       current = entry
       var result = { pid: handle.pid, port: data.port, contextSize: opt.contextSize, batchSize: opt.batchSize, ubatchSize: opt.ubatchSize, cacheTypeK: opt.cacheTypeK, cacheTypeV: opt.cacheTypeV, vramMB: opt.vramMB, vramUsage: opt.vramUsage, ramNeedMB: ramNeedMB, effFreeVRAM: effFreeVRAM, moeOffloadPct: opt.moeOffloadPct }
       entry.lastResult = result
+      // Wait until the server actually serves (llama /health returns 200 when
+      // ready, 503 while loading) before handing the stream to curl, so a model
+      // switch does not race the new server or stall the conversation.
+      var ready = await serverReady(data.port, 240000)
+      if (!ready) {
+        lastError = '本地模型服务启动超时（端口 ' + data.port + '）'
+        try { handle.terminate() } catch (_e) {}
+        current = null
+        throw new Error(lastError)
+      }
       return result
     }
 
