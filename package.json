@@ -1,20 +1,30 @@
 {
   "name": "dsh-local-models",
   "version": "0.1.0",
-  "description": "DeepSeek Harness 常驻宿主 bundle：本地 GGUF 模型（llama-server/TurboQuant）适配器，按显存自动优化 + 四场景随机可爱加载提示",
+  "description": "DeepSeek Harness 常驻 bundle：本地 GGUF 模型（llama-server/TurboQuant）适配器，按显存自动优化 + 四场景随机可爱提示 + 设置页/状态胶囊 UI",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
+    "lib/client.js",
     "cordis.patch.yml"
   ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime"
+      ]
     }
   },
   "scripts": {
