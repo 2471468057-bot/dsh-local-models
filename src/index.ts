@@ -264,6 +264,22 @@ export function apply(ctx: any) {
       return result
     }
 
+    function scrub(s) {
+      if (typeof s !== 'string') return ''
+      // Drop DSH tool/skill scaffolding that leaks into persisted history and
+      // makes small local models mimic markup (`<skill name=...>`, tool_call,
+      // `-call-...>` fragments, im_start tokens).
+      return s
+        .replace(/<available_skills>[\s\S]*?<\/available_skills>/gi, '')
+        .replace(/<skill\b[^>]*>[\s\S]*?<\/skill>/gi, '')
+        .replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi, '')
+        .replace(/<\|\w+\|>/g, '')
+        .replace(/name="[^"]*">/g, '')
+        .replace(/-call-[a-z-]+>/gi, '')
+        .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi, '')
+        .replace(/[\s\u3000]+/g, ' ')
+        .trim()
+    }
     function toOpenAiMessages(options) {
       var msgs = []
       // Local models run outside the harness's tool/skill scaffolding: feed a
@@ -283,7 +299,7 @@ export function apply(ctx: any) {
             if (b && b.type === 'text' && b.text) text += (text ? '\n' : '') + b.text
           }
         }
-        msgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: text })
+        msgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: scrub(text) })
       }
       return msgs
     }
