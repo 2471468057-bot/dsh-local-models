@@ -156,7 +156,7 @@ export function apply(ctx: any) {
       }
       var b = 2048, ub = 512
       if (freeVRAM > 0 && vramMB / freeVRAM > 0.9) { b = 1024; ub = 256 }
-      var args = ['-m', modelPath, '-ngl', '999', '-c', String(contextSize), '-b', String(b), '-ub', String(ub), '-ctk', ck, '-ctv', cv, '-fa', 'on', '--no-prefill', '--context-shift', '--host', '127.0.0.1', '--port', String(port), '--no-webui']
+      var args = ['-m', modelPath, '-ngl', '999', '-c', String(contextSize), '-b', String(b), '-ub', String(ub), '-ctk', ck, '-ctv', cv, '-fa', 'on', '--context-shift', '--host', '127.0.0.1', '--port', String(port), '--no-webui']
       if (moeOffloadPct > 0) args.push('--n-cpu-moe', String(moeOffloadPct))
       else if (!info.isMoE && freeVRAM > 12000) args.push('--mlock')
       return { args: args, contextSize: contextSize, batchSize: b, ubatchSize: ub, cacheTypeK: ck, cacheTypeV: cv, vramMB: vramMB, vramUsage: freeVRAM > 0 ? Math.min(100, Math.round(vramMB / freeVRAM * 100)) : 0, isMoE: info.isMoE, moeOffloadPct: moeOffloadPct }
