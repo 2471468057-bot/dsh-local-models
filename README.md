@@ -1,11 +1,12 @@
 # dsh-local-models
 
-DeepSeek Harness **常驻宿主 bundle**：本地 GGUF 模型（llama-server / TurboQuant）LLM 适配器。
+DeepSeek Harness **常驻宿主 bundle**：本地 GGUF 模型（llama-server / TurboQuant）LLM 适配器 + 设置页/状态胶囊 UI。
 
 - 发送消息自动拉起本地模型，按显存自动优化启动参数（KV 缓存 `turbo4+turbo3`、上下文预算、MoE `--n-cpu-moe` 精确外溢、`batch 2048/512`）
 - **四场景随机可爱加载提示**：首次唤醒 / 空闲自动卸载后重唤醒 / 切换模型 / 就绪收尾
 - 5 分钟空闲自动卸载；支持 MTP 自推测 / 外部草稿模型
-- 宿主层静态插件：随 profile 开机自启，**无需每次定义/批准**，重启即常驻
+- **静态设置页 + 状态胶囊**（设置 → 本地模型；输入框下沿胶囊显示 N 分钟后自动卸载、启动/卸载/热切换、扫描目录、MTP/草稿、保留显存/内存）
+- 宿主+客户端静态插件：随 profile 开机自启，**无需每次定义/批准**，重启即常驻
 
 ## 安装（bundle 方式）
 
