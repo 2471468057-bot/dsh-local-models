@@ -7,8 +7,8 @@ import { join } from 'node:path'
 export const name = 'dsh-local-models'
 export const inject = ['llm', 'timer']
 export function apply(ctx: any) {
-    var sp = ctx.get('subprocess')
-    var fsvc = ctx.get('fs')
+    function getSp() { return ctx.get('subprocess') }
+    function getFs() { return ctx.get('fs') }
     var CONFIG_PATH = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'local-models.json')
     function baseName(p) {
       return String(p).split(/[\\/]/).pop().replace(/\.(gguf|safetensors|bin)$/i, '')
@@ -60,6 +60,7 @@ export function apply(ctx: any) {
 
     var hwCache = { at: 0, gpu: null, ram: null }
     async function detectRam(cwd) {
+      var sp = getSp()
       if (hwCache.ram && Date.now() - hwCache.at < 60000) return hwCache.ram
       var out = { totalMB: 0, freeMB: 0 }
       try {
@@ -73,6 +74,7 @@ export function apply(ctx: any) {
       return out
     }
     async function detectGpu(cwd) {
+      var sp = getSp()
       if (hwCache.gpu && Date.now() - hwCache.at < 60000) return hwCache.gpu
       var out = { totalVRAM: 0, freeVRAM: 0, hasNvidia: false }
       try {
@@ -177,6 +179,8 @@ export function apply(ctx: any) {
     }, 30000)
 
     async function ensure(modelPath, data, force) {
+      var sp = getSp()
+      var fsvc = getFs()
       gc()
       if (!sp || typeof sp.spawn !== 'function') throw new Error('宿主 subprocess 服务不可用')
       if (!fsvc) throw new Error('宿主 fs 服务不可用')
@@ -314,6 +318,7 @@ export function apply(ctx: any) {
         return { model: await self.resolveModel(provider, model, signal), stream: function(options) { return self.stream(options) } }
       },
       stream: async function*(options) {
+        var sp = getSp()
         var data, card, handle
         var hintIndex = 0, realIndex = 1
         var hinted = false
@@ -447,6 +452,7 @@ export function apply(ctx: any) {
         }
       },
       scan: async function(args) {
+        var fsvc = getFs()
         if (!fsvc || typeof fsvc.listDir !== 'function') return { ok: false, error: '宿主 fs 服务不可用' }
         var dirPath = String((args && args.dir) || '').trim()
         if (!dirPath) return { ok: false, error: '未填写目录路径' }
@@ -490,6 +496,7 @@ export function apply(ctx: any) {
         }
       },
       drafts: async function(args) {
+        var fsvc = getFs()
         if (!fsvc || typeof fsvc.listDir !== 'function') return { ok: false, error: '宿主 fs 服务不可用' }
         var modelPath = String((args && args.model) || '')
         var cutAt = Math.max(modelPath.lastIndexOf('\\'), modelPath.lastIndexOf('/'))
