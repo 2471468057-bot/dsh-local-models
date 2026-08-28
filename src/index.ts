@@ -266,7 +266,11 @@ export function apply(ctx: any) {
 
     function toOpenAiMessages(options) {
       var msgs = []
-      if (options.system) msgs.push({ role: 'system', content: String(options.system) })
+      // Local models run outside the harness's tool/skill scaffolding: feed a
+      // minimal system prompt so small models do not echo tool/skill XML on
+      // the first turn (the full DSH prompt with `<skill name=...>` entries
+      // makes weak models regurgitate that markup instead of answering).
+      msgs.push({ role: 'system', content: '你是一个乐于助人的中文AI助手。请简洁、自然、直接地回答用户问题，不要输出任何工具调用、XML标签或Markdown代码块。' })
       var list = Array.isArray(options.messages) ? options.messages : []
       for (var i = 0; i < list.length; i++) {
         var m = list[i]
