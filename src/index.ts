@@ -156,7 +156,7 @@ export function apply(ctx: any) {
       }
       var b = 2048, ub = 512
       if (freeVRAM > 0 && vramMB / freeVRAM > 0.9) { b = 1024; ub = 256 }
-      var args = ['-m', modelPath, '-ngl', '999', '-c', String(contextSize), '-b', String(b), '-ub', String(ub), '-ctk', ck, '-ctv', cv, '-fa', 'on', '--context-shift', '--host', '127.0.0.1', '--port', String(port), '--no-webui']
+      var args = ['-m', modelPath, '-ngl', '999', '-c', String(contextSize), '-b', String(b), '-ub', String(ub), '-ctk', ck, '-ctv', cv, '-fa', 'on', '--no-prefill', '--context-shift', '--host', '127.0.0.1', '--port', String(port), '--no-webui']
       if (moeOffloadPct > 0) args.push('--n-cpu-moe', String(moeOffloadPct))
       else if (!info.isMoE && freeVRAM > 12000) args.push('--mlock')
       return { args: args, contextSize: contextSize, batchSize: b, ubatchSize: ub, cacheTypeK: ck, cacheTypeV: cv, vramMB: vramMB, vramUsage: freeVRAM > 0 ? Math.min(100, Math.round(vramMB / freeVRAM * 100)) : 0, isMoE: info.isMoE, moeOffloadPct: moeOffloadPct }
@@ -327,7 +327,7 @@ export function apply(ctx: any) {
       // weak models neither echo the giant DSH prompt nor pay a long prefill.
       msgs.push({ role: 'system', content: '你是一个乐于助人的中文AI助手。请简洁、自然、直接地回答用户问题，不要输出任何工具调用、XML标签或Markdown代码块。' })
       var list = Array.isArray(options.messages) ? options.messages : []
-      var recent = list.slice(-8)
+      var recent = list.slice(-3)
       for (var i = 0; i < recent.length; i++) {
         var text = scrub(extractText(recent[i]))
         if (!text) continue
@@ -335,6 +335,7 @@ export function apply(ctx: any) {
         // conversation (injected by the harness or leaked into persisted
         // history); forwarding them makes the model regurgitate them.
         if (SCAFFOLD_RE.test(text)) continue
+        if (text.length > 300) text = text.slice(0, 300) + '…'
         msgs.push({ role: recent[i].role === 'assistant' ? 'assistant' : 'user', content: text })
       }
       return msgs
