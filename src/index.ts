@@ -358,7 +358,7 @@ export function apply(ctx: any) {
         var started = false
         var queue = []
         var wake = null
-        var sseBuf = ''
+        var sseBuf = Buffer.alloc(0)
         try {
           data = await readData()
           card = data.models.find(function(m) { return m.path === options.model })
@@ -412,17 +412,18 @@ export function apply(ctx: any) {
             }
           }
           handle.stdout.on('data', function(chunk) {
-            sseBuf += chunk.toString('utf8')
+            sseBuf = Buffer.concat([sseBuf, chunk])
             var nl
-            while ((nl = sseBuf.indexOf('\n')) >= 0) {
-              var line = sseBuf.slice(0, nl).replace(/\r$/, '')
-              sseBuf = sseBuf.slice(nl + 1)
+            while ((nl = sseBuf.indexOf(10)) >= 0) {
+              var line = sseBuf.subarray(0, nl).toString('utf8').replace(/\r$/, '')
+              sseBuf = sseBuf.subarray(nl + 1)
               feedLine(line)
             }
           })
           handle.stdout.on('end', function() {
-            if (sseBuf.trim()) feedLine(sseBuf.replace(/[\r\n]+$/, ''))
-            sseBuf = ''
+            var rest = sseBuf.toString('utf8').replace(/[\r\n]+$/, '')
+            if (rest.trim()) feedLine(rest)
+            sseBuf = Buffer.alloc(0)
             push(started || hinted ? { done: true } : { err: new Error('本地模型服务无响应（端口 ' + data.port + '）：后端可能在加载中或启动失败，请看状态胶囊/设置页') })
           })
           handle.stdout.on('error', function(e) { push({ err: e instanceof Error ? e : new Error(String(e)) }) })
