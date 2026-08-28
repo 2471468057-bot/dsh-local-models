@@ -280,6 +280,32 @@ export function apply(ctx: any) {
         .replace(/[\s\u3000]+/g, ' ')
         .trim()
     }
+    function deriveTitle(options) {
+      var text = ''
+      var list = Array.isArray(options.messages) ? options.messages : []
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i] && list[i].content
+        if (typeof c === 'string') { text = c; break }
+        if (Array.isArray(c)) {
+          for (var j = 0; j < c.length; j++) {
+            var b = c[j]
+            if (b && b.type === 'text' && b.text) { text = b.text; break }
+          }
+          if (text) break
+        }
+      }
+      var m = /\[[\s\S]*\]/.exec(text)
+      var human = text
+      if (m) {
+        try {
+          var arr = JSON.parse(m[0])
+          if (Array.isArray(arr) && arr.length > 0 && typeof arr[0].text === 'string') human = arr[0].text
+        } catch (_e) {}
+      }
+      human = String(human).replace(/\s+/g, ' ').trim()
+      if (human.length > 24) human = human.slice(0, 24) + '…'
+      return human || '新会话'
+    }
     var SCAFFOLD_RE = /To use the skill tool|agent-presets|memory_remember|available_skills|system prompt|系统提示词|policy file|deepseek-harness|\.agent-presets/i
     function extractText(m) {
       var content = m && m.content
@@ -389,6 +415,17 @@ export function apply(ctx: any) {
         var queue = []
         var wake = null
         var sseBuf = Buffer.alloc(0)
+        // Session-title auxiliary requests: return a title derived from the
+        // user's message instead of letting the local model free-answer (which
+        // turns the left-pane title into the model's reply).
+        if (options.purpose === 'session-title') {
+          var t = deriveTitle(options)
+          yield { type: 'block-start', index: hintIndex, blockType: 'text' }
+          yield { type: 'text-delta', index: hintIndex, text: t }
+          yield { type: 'block-end', index: hintIndex, block: { type: 'text', text: t } }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+          return
+        }
         try {
           data = await readData()
           card = data.models.find(function(m) { return m.path === options.model })
