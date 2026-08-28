@@ -1,6 +1,6 @@
 // @ts-nocheck -- untyped port of a runtime Cordis plugin body; esbuild bundles
 // it without a checker (see build.mjs), so strict annotation adds no value here.
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,6 +15,9 @@ export function apply(ctx: any) {
     }
     var IDLE_MS = 5 * 60 * 1000
     var ROUTE = 'local-turbo'
+    var MIN_SIZE = 1258291200
+    var SKIP_DIR = /^(node_modules|\.git|\.hg|\.svn|\$recycle\.bin|system volume information|lost\+found)$/i
+    var VIS_RE = /mmproj|projector|vision|visual|clip|ocr|image|vit[-_. 0-9]|[-_. ]vl[-_. 0-9]|internvl|minicpm-v/i
     var lastError = null
 
     function clampGB(v) {
@@ -412,6 +415,172 @@ export function apply(ctx: any) {
         }
       },
     }
+
+    function writeConfig(data) {
+      writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf8')
+    }
+    function runEnsure(args, force) {
+      return (async function() {
+        try {
+          var data = readData()
+          var target = String((args && args.model) || data.primary || (data.models[0] && data.models[0].path) || '')
+          if (!target) return { ok: false, error: '没有可启动的模型' }
+          var r = await ensure(target, data, force)
+          return Object.assign({ ok: true }, r)
+        } catch (err) {
+          lastError = String(err && err.message || err)
+          return { ok: false, error: lastError }
+        }
+      })()
+    }
+
+    var localModels = {
+      state: async function() {
+        return { ok: true, data: readData() }
+      },
+      saveAll: async function(args) {
+        try {
+          writeConfig(normalize(args && args.data))
+          return { ok: true }
+        } catch (e) {
+          return { ok: false, error: String(e && e.message || e) }
+        }
+      },
+      scan: async function(args) {
+        if (!fsvc || typeof fsvc.listDir !== 'function') return { ok: false, error: '宿主 fs 服务不可用' }
+        var dirPath = String((args && args.dir) || '').trim()
+        if (!dirPath) return { ok: false, error: '未填写目录路径' }
+        var out = []
+        var dirsWalked = 0
+        async function walk(target, depth) {
+          if (depth > 3 || out.length >= 200 || dirsWalked > 400) return
+          dirsWalked++
+          var entries
+          try { entries = await fsvc.listDir(target) } catch (_err) { return }
+          for (var i = 0; i < entries.length; i++) {
+            if (out.length >= 200) return
+            var e = entries[i]
+            if (!e) continue
+            var name = String(e.name)
+            if (e.type === 'directory') {
+              if (SKIP_DIR.test(name)) continue
+              await walk(e.target, depth + 1)
+              continue
+            }
+            if (e.type !== 'file' && e.type !== 'symlink') continue
+            if (!/\.(gguf|safetensors|bin)$/i.test(name)) continue
+            var size = typeof e.size === 'number' ? e.size : undefined
+            if (size === undefined) {
+              try { var si = await fsvc.stat(e.target); size = si && si.type === 'file' ? si.size : undefined } catch (_e2) {}
+            }
+            if (typeof size !== 'number' || size <= MIN_SIZE) continue
+            out.push({ path: String(e.target.displayPath), name: name, size: size })
+          }
+        }
+        try {
+          var t = await fsvc.resolve(dirPath)
+          var info = await fsvc.stat(t)
+          if (!info) return { ok: false, error: '目录不存在：' + dirPath }
+          if (info.type !== 'directory') return { ok: false, error: '该路径不是目录：' + dirPath }
+          await walk(t, 0)
+          out.sort(function(a, b) { return b.size - a.size })
+          return { ok: true, scanned: dirsWalked, models: out }
+        } catch (err) {
+          return { ok: false, error: '扫描失败：' + String(err && err.code ? '[' + err.code + '] ' : '') + String(err && err.message || err) }
+        }
+      },
+      drafts: async function(args) {
+        if (!fsvc || typeof fsvc.listDir !== 'function') return { ok: false, error: '宿主 fs 服务不可用' }
+        var modelPath = String((args && args.model) || '')
+        var cutAt = Math.max(modelPath.lastIndexOf('\\'), modelPath.lastIndexOf('/'))
+        if (cutAt <= 0) return { ok: false, error: '无法确定模型所在文件夹' }
+        var dirPath = modelPath.slice(0, cutAt)
+        var exclude = {}
+        exclude[modelPath] = true
+        ;(Array.isArray(args && args.exclude) ? args.exclude : []).forEach(function(p) { exclude[String(p)] = true })
+        var out = []
+        var skipped = 0
+        async function walk(target, depth) {
+          if (depth > 1 || out.length >= 60) return
+          var entries
+          try { entries = await fsvc.listDir(target) } catch (_err) { return }
+          for (var i = 0; i < entries.length; i++) {
+            if (out.length >= 60) return
+            var e = entries[i]
+            if (!e) continue
+            var name = String(e.name)
+            if (e.type === 'directory' && depth === 0 && !SKIP_DIR.test(name)) {
+              await walk(e.target, depth + 1)
+              continue
+            }
+            if (e.type !== 'file' && e.type !== 'symlink') continue
+            if (!/\.(gguf|safetensors|bin)$/i.test(name)) continue
+            var p = String(e.target.displayPath)
+            if (exclude[p]) continue
+            if (VIS_RE.test(name.toLowerCase())) { skipped++; continue }
+            var size = typeof e.size === 'number' ? e.size : undefined
+            if (size === undefined) {
+              try { var si = await fsvc.stat(e.target); size = si && si.type === 'file' ? si.size : undefined } catch (_e2) {}
+            }
+            if (typeof size !== 'number' || size < 8388608) continue
+            out.push({ path: p, name: name, size: size })
+          }
+        }
+        try {
+          var t = await fsvc.resolve(dirPath)
+          var info = await fsvc.stat(t)
+          if (!info || info.type !== 'directory') return { ok: false, error: '模型文件夹不存在：' + dirPath }
+          await walk(t, 0)
+          out.sort(function(a, b) { return a.size - b.size })
+          return { ok: true, dir: dirPath, models: out, skipped: skipped }
+        } catch (err) {
+          return { ok: false, error: '读取文件夹失败：' + String(err && err.message || err) }
+        }
+      },
+      status: async function() {
+        gc()
+        var out = { phase: current ? 'running' : 'idle', running: Boolean(current) }
+        if (current) {
+          out.pid = current.meta.pid
+          out.port = current.meta.port
+          out.model = current.meta.model
+          out.modelName = current.meta.name
+          out.idleSec = Math.floor(idleMs() / 1000)
+          if (current.lastResult) {
+            out.contextSize = current.lastResult.contextSize
+            out.cacheTypeK = current.lastResult.cacheTypeK
+            out.cacheTypeV = current.lastResult.cacheTypeV
+          }
+        }
+        if (lastError) out.lastError = lastError
+        if (lastExit) out.lastExit = { exitCode: lastExit.exitCode, name: lastExit.name, swapped: Boolean(lastExit.swapped), idle: Boolean(lastExit.idle) }
+        return out
+      },
+      ensure: async function(args) { return runEnsure(args, false) },
+      relaunch: async function(args) { return runEnsure(args, true) },
+      stop: async function() {
+        if (!current) return { ok: true, stopped: false }
+        lastExit = { exitCode: 0, model: current.meta.model, name: current.meta.name, manual: true }
+        current.meta.retired = true
+        current.handle.terminate()
+        current = null
+        return { ok: true, stopped: true }
+      },
+      gpu: async function(args) {
+        try {
+          var g = await detectGpu(String((args && args.backend) || ''))
+          var ram = await detectRam(String((args && args.backend) || ''))
+          if (!g.hasNvidia && ram.totalMB === 0) return { ok: false, error: '未检测到 NVIDIA GPU，也无法读取内存信息' }
+          return { ok: true, totalMB: g.totalVRAM, freeMB: g.freeVRAM, ramTotalMB: ram.totalMB, ramFreeMB: ram.freeMB }
+        } catch (err) {
+          return { ok: false, error: '硬件检测失败：' + String(err && err.message || err) }
+        }
+      },
+    }
+
+    ctx.effect(function() {
+      return ctx.provide('localModels', localModels)
+    }, 'dsh-local-models: localModels service')
 
     ctx.effect(function() {
       return ctx.llm.registerAdapter([ROUTE], adapter)
