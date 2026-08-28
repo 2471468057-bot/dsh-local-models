@@ -280,26 +280,36 @@ export function apply(ctx: any) {
         .replace(/[\s\u3000]+/g, ' ')
         .trim()
     }
+    var SCAFFOLD_RE = /To use the skill tool|agent-presets|memory_remember|available_skills|system prompt|系统提示词|policy file|deepseek-harness|\.agent-presets/i
+    function extractText(m) {
+      var content = m && m.content
+      if (typeof content === 'string') return content
+      if (Array.isArray(content)) {
+        var text = ''
+        for (var j = 0; j < content.length; j++) {
+          var b = content[j]
+          if (b && b.type === 'text' && b.text) text += (text ? '\n' : '') + b.text
+        }
+        return text
+      }
+      return ''
+    }
     function toOpenAiMessages(options) {
       var msgs = []
       // Local models run outside the harness's tool/skill scaffolding: feed a
-      // minimal system prompt so small models do not echo tool/skill XML on
-      // the first turn (the full DSH prompt with `<skill name=...>` entries
-      // makes weak models regurgitate that markup instead of answering).
+      // minimal system prompt and only the recent real conversation turns, so
+      // weak models neither echo the giant DSH prompt nor pay a long prefill.
       msgs.push({ role: 'system', content: '你是一个乐于助人的中文AI助手。请简洁、自然、直接地回答用户问题，不要输出任何工具调用、XML标签或Markdown代码块。' })
       var list = Array.isArray(options.messages) ? options.messages : []
-      for (var i = 0; i < list.length; i++) {
-        var m = list[i]
-        var content = m.content
-        var text = ''
-        if (typeof content === 'string') text = content
-        else if (Array.isArray(content)) {
-          for (var j = 0; j < content.length; j++) {
-            var b = content[j]
-            if (b && b.type === 'text' && b.text) text += (text ? '\n' : '') + b.text
-          }
-        }
-        msgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: scrub(text) })
+      var recent = list.slice(-8)
+      for (var i = 0; i < recent.length; i++) {
+        var text = scrub(extractText(recent[i]))
+        if (!text) continue
+        // Drop messages that are system/skill instruction scaffolding, not real
+        // conversation (injected by the harness or leaked into persisted
+        // history); forwarding them makes the model regurgitate them.
+        if (SCAFFOLD_RE.test(text)) continue
+        msgs.push({ role: recent[i].role === 'assistant' ? 'assistant' : 'user', content: text })
       }
       return msgs
     }
